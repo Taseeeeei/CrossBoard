@@ -314,7 +314,7 @@ class CrossboardUI:
         player2_side.pack(side="left", padx=(0, 8), fill="y")
         player2_side.pack_propagate(False)
         self._build_hand_tray(
-            player2_side, owner=1, height=max(260, int(extent * 0.54)), anchor="bottom"
+            player2_side, owner=1, height=max(260, int(extent * 0.54)), anchor="top"
         )
 
         left.pack(side="left", padx=(0, 8))
@@ -325,7 +325,7 @@ class CrossboardUI:
         player1_side.pack(side="left", padx=(0, 8), fill="y")
         player1_side.pack_propagate(False)
         self._build_hand_tray(
-            player1_side, owner=0, height=max(260, int(extent * 0.54)), anchor="top"
+            player1_side, owner=0, height=max(260, int(extent * 0.54)), anchor="bottom"
         )
 
         right = tk.Frame(
@@ -343,33 +343,7 @@ class CrossboardUI:
                      font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=6)
         tk.Button(right, text="選択解除", command=self.clear_selection).pack(anchor="w", pady=4)
         self._build_piece_info(right)
-        tk.Label(right, text="コリドールの壁（マークを盤にドラッグ）").pack(
-            anchor="w", pady=(8, 2)
-        )
-        wall_marks = tk.Frame(right)
-        wall_marks.pack(fill="x")
-        wall_count = g.wall_hands[g.turn]
-        for orientation, label in (("horizontal", "横向き"), ("vertical", "縦向き")):
-            marker = tk.Canvas(
-                wall_marks,
-                width=260,
-                height=34,
-                highlightthickness=1,
-                highlightbackground="#aaa",
-                cursor="hand2" if wall_count and not g.result else "arrow",
-                state=tk.NORMAL if wall_count and not g.result else tk.DISABLED,
-            )
-            marker.pack(anchor="w", pady=1)
-            if orientation == "horizontal":
-                marker.create_line(12, 17, 48, 17, fill="#333", width=7)
-            else:
-                marker.create_line(30, 4, 30, 30, fill="#333", width=7)
-            marker.create_text(62, 17, anchor="w", text=f"{label}の壁 ({wall_count})")
-            marker.bind(
-                "<ButtonPress-1>",
-                lambda event, direction=orientation: self.start_wall_drag(direction),
-            )
-        tk.Label(right, text=f"壁の手持ち: 白 {g.wall_hands[0]}枚 / 黒 {g.wall_hands[1]}枚").pack(anchor="w")
+
         tk.Label(right, text="ログ", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(8, 0))
         log = tk.Text(right, height=3, width=34, state="normal")
         log.pack(fill="both", expand=True)
@@ -670,7 +644,7 @@ class CrossboardUI:
         elif piece.kind == "checker":
             effects.append("飛び越えて取れるときは捕獲が必須です。連続捕獲は相手の手番後に続けます。")
         elif piece.kind == "reversi":
-            effects.append("挟んだ敵駒を裏返します。挟まれる駒は種類不問、両端は味方のリバーシ駒に限ります。")
+            effects.append("挟んだ敵駒を自分の駒にします。ただし、挟む両端は味方のリバーシ駒に限ります。")
         elif piece.kind == "go_stone":
             effects.append("置いた石は動きません。呼吸点がなくなる手はできません（相手を取る場合を除く）。")
         if piece.promoted and piece.spec.source == "Shogi":
@@ -780,6 +754,22 @@ class CrossboardUI:
                 if self.selected==(x,y):
                     self.canvas.create_rectangle(x0+2,y0+2,x0+self.CELL-2,y0+self.CELL-2,
                                                  outline="#17a34a",width=3)
+        # SLIPEの大将がいるとき、中央マスに□を描画
+        slipe_general_exists = any(
+            piece.general and piece.spec.source == "SLIPE"
+            for piece in (
+                list(g.board.values()) + [p for hand in g.hands for p in hand]
+            )
+        )
+        if slipe_general_exists:
+            cx = g.size // 2
+            cy = g.size // 2
+            x0, y0 = cx * self.CELL, cy * self.CELL
+            self.canvas.create_rectangle(
+                x0 + 5, y0 + 5, x0 + self.CELL - 5, y0 + self.CELL - 5,
+                outline="#555", width=2, fill="",
+            )
+
         for wall in g.walls:
             self.canvas.create_line(
                 *self._wall_pixel_segment(wall),

@@ -290,53 +290,91 @@ class GameState:
                         self.hands[owner].append(self.make_piece(spec, owner))
 
     def setup_rosters(self, rosters: list[list[PieceSpec]]) -> None:
-        """Place generals and then pieces in each player's home three ranks."""
+        """Place pieces in each player's home three ranks.
+
+        Layout rules:
+        - General: center of the front row (closest row to the player).
+        - Weak pieces (cost == 1, e.g. pawns): front row, centered; overflow
+          to the second row if the front row is full.
+        - Other pieces: remaining home cells (rows 2-3 from front), shuffled.
+        - reversi / go_stone pieces stay in hand (they are dropped during play).
+        """
         self.add_roster_to_hand(rosters)
         for owner in (0, 1):
-            home_rows = range(self.size - 3, self.size) if owner == 0 else range(0, 3)
-            cells = [(x, y) for y in home_rows for x in range(self.size)]
-            cx = self.size // 2
-            candidates = [p for p in cells if p not in (
-                (cx, self.size - 2 if owner == 0 else 1),
-                (cx, self.size - 1 if owner == 0 else 0),
-            )]
-            hand = self.hands[owner]
-            leader = next(p for p in hand if p.general)
-            if leader.kind == "xiangqi_general":
-                palace_rows = list(range(self.size - 3, self.size)) if owner == 0 else list(range(0, 3))
-                target = (cx, palace_rows[1])
-            elif leader.kind == "quoridor_runner":
-                target = (cx, self.size - 1 if owner == 0 else 0)
-            elif leader.kind == "chess_king":
-                target = (cx, self.size - 1 if owner == 0 else 0)
+            # Row indices from the player's perspective:
+            #   home_y    = back row (closest to player)  → general placed here
+            #   mid_y     = middle row                    → strong pieces (random)
+            #   vanguard_y= front row (closest to foe)   → weak pieces (centered)
+            if owner == 0:
+                home_y, mid_y, vanguard_y = self.size - 1, self.size - 2, self.size - 3
             else:
-                target = (cx, self.size - 2 if owner == 0 else 1)
+                home_y, mid_y, vanguard_y = 0, 1, 2
+            cx = self.size // 2
+
+            hand = self.hands[owner]
+
+            # --- Place general at center of the home (back) row ---
+            leader = next(p for p in hand if p.general)
             hand.remove(leader)
-            self.board[target] = leader
-            # Keep the chess home row clear for a possible castle. Rooks are
-            # placed at the board edges before other pieces are distributed.
+            self.board[(cx, home_y)] = leader
+
+            # Chess king: also place rooks at the edges of the home row for
+            # castling before distributing other pieces.
             if leader.kind == "chess_king":
-                home_y = target[1]
                 for rook_x in (0, self.size - 1):
                     rook = next((p for p in hand if p.kind == "chess_rook"), None)
                     if rook is not None and (rook_x, home_y) not in self.board:
                         hand.remove(rook)
                         self.board[(rook_x, home_y)] = rook
-            for pos in candidates:
-                if pos == target or pos in self.board:
-                    continue
-                deploy_index = next(
-                    (i for i, piece in enumerate(hand)
-                     if piece.kind not in ("reversi", "go_stone")),
-                    None,
-                )
-                if deploy_index is None:
-                    break
-                p = hand.pop(deploy_index)
-                if p.kind == "wall":
-                    self.wall_hands[owner] += 1
-                    continue
-                self.board[pos] = p
+
+            # --- Separate deployable pieces into weak vs. strong ---
+            def _is_deployable(p) -> bool:
+                return p.kind not in ("reversi", "go_stone", "wall")
+
+            weak_pieces = [p for p in hand if _is_deployable(p) and (p.spec.cost <= 1 or p.kind == "checker")]
+            strong_pieces = [p for p in hand if _is_deployable(p) and p.spec.cost > 1 and p.kind != "checker"]
+
+            for p in weak_pieces + strong_pieces:
+                hand.remove(p)
+            # Wall pieces stay in hand as wall counts.
+            for p in [p for p in hand if p.kind == "wall"]:
+                hand.remove(p)
+                self.wall_hands[owner] += 1
+
+            # --- Vanguard row: weak pieces, center-out, overflow to mid row ---
+            vanguard_cells = sorted(
+                [(x, vanguard_y) for x in range(self.size)],
+                key=lambda c: abs(c[0] - cx),
+            )
+            mid_cells = [(x, mid_y) for x in range(self.size)]
+            overflow_pool = iter(mid_cells)
+
+            vanguard_iter = iter(vanguard_cells)
+            for p in weak_pieces:
+                placed = False
+                for cell in vanguard_iter:
+                    if cell not in self.board:
+                        self.board[cell] = p
+                        placed = True
+                        break
+                if not placed:
+                    for cell in overflow_pool:
+                        if cell not in self.board:
+                            self.board[cell] = p
+                            break
+
+            # --- Mid + remaining home cells only: strong pieces (random) ---
+            # Vanguard row is reserved for weak pieces and is excluded here.
+            remaining_cells = [
+                (x, y)
+                for y in (mid_y, home_y)
+                for x in range(self.size)
+                if (x, y) not in self.board
+            ]
+            random.shuffle(remaining_cells)
+
+            for p, cell in zip(strong_pieces, remaining_cells):
+                self.board[cell] = p
 
     def _forward(self, owner: int) -> int:
         return -1 if owner == 0 else 1
