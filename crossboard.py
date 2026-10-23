@@ -15,6 +15,17 @@ Coord = tuple[int, int]
 Edge = frozenset[Coord]
 WallPlacement = tuple[str, int, int]
 
+# Coordinate notation helpers: column = 9-1 (size - x), row = 一〜九 (y) (top-right is 1一)
+_ROW_KANJI = "一二三四五六七八九"
+
+
+def _coord(pos: Coord, size: int = 9) -> str:
+    """Return a human-readable board coordinate string like '5五' (top-right is 1一)."""
+    x, y = pos
+    col = size - x
+    row = _ROW_KANJI[y] if 0 <= y < len(_ROW_KANJI) else str(y + 1)
+    return f"{col}{row}"
+
 GAMES = (
     "Shogi", "Chess", "Othello", "Go", "Quoridor",
     "Xiangqi", "Taikyoku Shogi", "Checkers", "Chaturanga", "SLIPE",
@@ -436,14 +447,17 @@ class GameState:
                 break
         return moves
 
-    def _step_moves(self, origin: Coord, piece: Piece,
-                    offsets: Iterable[Coord]) -> list[Move]:
+    def _step_moves(
+        self, origin: Coord, piece: Piece,
+        offsets: Iterable[Coord],
+        ignore_walls: bool = False,
+    ) -> list[Move]:
         out = []
         for dx, dy in offsets:
             q = (origin[0]+dx, origin[1]+dy)
             if not self.in_bounds(q):
                 continue
-            if self._blocked(origin, q):
+            if not ignore_walls and self._blocked(origin, q):
                 continue
             target = self.board.get(q)
             if target is None:
@@ -620,10 +634,10 @@ class GameState:
         if k in ("chess_queen",):
             return self._ray(pos, king, piece)
         if k in ("chess_knight","shogi_knight","chaturanga_knight"):
-        # Leapers jump over pieces, while Quoridor walls still block their path.
+        # Leapers jump over pieces. Knights and Keima also leap over Quoridor walls.
             steps = [(1,2),(-1,2),(1,-2),(-1,-2)] if k == "shogi_knight" else [
                 (1,2),(-1,2),(1,-2),(-1,-2),(2,1),(-2,1),(2,-1),(-2,-1)]
-            return self._step_moves(pos,piece,steps)
+            return self._step_moves(pos, piece, steps, ignore_walls=True)
         if k == "shogi_pawn":
             return self._step_moves(pos,piece,[(0,f)])
         if k == "shogi_silver":
@@ -1046,7 +1060,7 @@ class GameState:
         piece.owner=self.turn
         piece.moved=True
         self.board[pos]=piece
-        self.events.append(f"{piece.spec.name}を配置")
+        self.events.append(f"{piece.spec.name}打{_coord(pos, self.size)}")
         self._resolve_after_action(self.turn, moved_piece=piece, pos=pos)
 
     def apply_move(
@@ -1099,6 +1113,9 @@ class GameState:
             mid=(move.origin[0],(move.origin[1]+move.target[1])//2)
             self.en_passant=(mid,move.target,1-actor)
         self._promote_if_needed(piece,move.target,promote,promotion_kind)
+        self.events.append(
+            f"{piece.spec.name} {_coord(move.origin, self.size)}→{_coord(move.target, self.size)}"
+        )
         self._resolve_after_action(
             actor,
             piece,
@@ -1446,5 +1463,6 @@ class GameState:
             raise ValueError("壁を配置できません")
         self.wall_hands[self.turn]-=1
         self.walls.add(wall)
-        self.events.append("コリドールの壁を配置")
+        orient_label = "横" if wall[0] == "horizontal" else "縦"
+        self.events.append(f"壁{orient_label} {_coord((wall[1], wall[2]), self.size)}")
         self._resolve_after_action(self.turn,None,(-1,-1))

@@ -15,6 +15,8 @@ from crossboard import DraftSession, GameConfig, GameState, Move, sample_draft_p
 
 class CrossboardUI:
     CELL = 72
+    LABEL_MARGIN = 14          # pixels reserved for row/column labels
+    ROW_KANJI = "一二三四五六七八九"
     COLORS = ("#b94949", "#3974aa")
     SIDE_NAMES = ("白", "黒")
     PIECE_IMAGE_SIZE = 58
@@ -107,7 +109,7 @@ class CrossboardUI:
         "slipe_king": "縦または横に何マスでも進めます。",
         "slipe_slider": "縦または横に何マスでも進めます。",
         "shogi_pawn": "前へ1マス。",
-        "shogi_knight": "前方へ2マス進み、左右どちらかへ1マス跳びます。",
+        "shogi_knight": "前方へ2マス進み、左右どちらかへ1マス跳びます。途中の駒や壁を飛び越せます。",
         "shogi_silver": "前へ1マス、または前後斜めへ1マス。",
         "shogi_gold": "前・左右・後ろへ1マス、または前斜めへ1マス。",
         "promoted_shogi_pawn": "前・左右・後ろへ1マス、または前斜めへ1マス。",
@@ -119,7 +121,7 @@ class CrossboardUI:
         "chess_pawn": "前へ1マス。初期位置では条件を満たせば2マス進めます。捕獲は前斜めです。",
         "chess_rook": "縦または横に何マスでも進めます。",
         "chess_bishop": "斜めに何マスでも進めます。",
-        "chess_knight": "縦横に2マスと1マスのL字に跳びます。途中の駒は飛び越せます。",
+        "chess_knight": "縦横に2マスと1マスのL字に跳びます。途中の駒や壁を飛び越せます。",
         "chess_queen": "縦・横・斜めに何マスでも進めます。",
         "reversi": "盤上を移動しません。手駒から空きマスに置きます。",
         "go_stone": "盤上を移動しません。手駒から交点に置きます。",
@@ -303,7 +305,8 @@ class CrossboardUI:
         extent = self.CELL * g.size
 
         left = tk.Frame(self.container)
-        self.canvas = tk.Canvas(left, width=extent, height=extent,
+        self.canvas = tk.Canvas(left, width=extent + self.LABEL_MARGIN,
+                                height=extent + self.LABEL_MARGIN,
                                 highlightthickness=1, highlightbackground="#444")
         self.canvas.pack()
         self.canvas.bind("<Button-1>", self.board_click)
@@ -710,9 +713,10 @@ class CrossboardUI:
                         highlight_all = True
                 else:
                     drop_targets = set(g.legal_drops(self.selected_hand))
+        lm = self.LABEL_MARGIN
         for y in range(g.size):
             for x in range(g.size):
-                x0, y0 = x*self.CELL, y*self.CELL
+                x0, y0 = x*self.CELL, y*self.CELL + lm
                 piece=g.board.get((x,y))
                 is_general = bool(piece and piece.general)
                 color = "#efc6c6" if is_general else (
@@ -764,10 +768,31 @@ class CrossboardUI:
         if slipe_general_exists:
             cx = g.size // 2
             cy = g.size // 2
-            x0, y0 = cx * self.CELL, cy * self.CELL
+            x0, y0 = cx * self.CELL, cy * self.CELL + lm
             self.canvas.create_rectangle(
                 x0 + 5, y0 + 5, x0 + self.CELL - 5, y0 + self.CELL - 5,
                 outline="#555", width=2, fill="",
+            )
+
+        # 列番号（右端が1、左端が9）を上端に描画
+        for x in range(g.size):
+            self.canvas.create_text(
+                x * self.CELL + self.CELL // 2,
+                lm // 2,
+                text=str(g.size - x),
+                font=("Segoe UI", 7),
+                fill="#555",
+            )
+        # 行漢字（一〜九）を右端に描画
+        board_extent = self.CELL * g.size
+        for y in range(g.size):
+            kanji = self.ROW_KANJI[y] if y < len(self.ROW_KANJI) else str(y + 1)
+            self.canvas.create_text(
+                board_extent + lm // 2,
+                y * self.CELL + lm + self.CELL // 2,
+                text=kanji,
+                font=("Segoe UI", 7),
+                fill="#555",
             )
 
         for wall in g.walls:
@@ -818,7 +843,8 @@ class CrossboardUI:
 
     def board_click(self, event) -> None:
         g=self.game
-        pos=(event.x//self.CELL,event.y//self.CELL)
+        lm = self.LABEL_MARGIN
+        pos=(event.x//self.CELL, (event.y - lm)//self.CELL)
         if not g.in_bounds(pos): return
         if g.result:
             piece = g.board.get(pos)
@@ -969,15 +995,16 @@ class CrossboardUI:
 
     def _wall_pixel_segment(self, wall) -> tuple[float, float, float, float]:
         orientation, x, y = wall
+        lm = self.LABEL_MARGIN
         inset = max(3, self.CELL * 0.06)
         if orientation == "horizontal":
             return (
-                x*self.CELL + inset, (y+1)*self.CELL,
-                (x+2)*self.CELL - inset, (y+1)*self.CELL,
+                x*self.CELL + inset, (y+1)*self.CELL + lm,
+                (x+2)*self.CELL - inset, (y+1)*self.CELL + lm,
             )
         return (
-            (x+1)*self.CELL, y*self.CELL + inset,
-            (x+1)*self.CELL, (y+2)*self.CELL - inset,
+            (x+1)*self.CELL, y*self.CELL + lm + inset,
+            (x+1)*self.CELL, (y+2)*self.CELL + lm - inset,
         )
 
     def start_wall_drag(self, orientation: str) -> None:
@@ -1017,7 +1044,7 @@ class CrossboardUI:
         def distance_squared(wall) -> float:
             _orientation, anchor_x, anchor_y = wall
             midpoint_x = (anchor_x + 1) * self.CELL
-            midpoint_y = (anchor_y + 1) * self.CELL
+            midpoint_y = (anchor_y + 1) * self.CELL + self.LABEL_MARGIN
             return (x-midpoint_x) ** 2 + (y-midpoint_y) ** 2
 
         nearest = min(candidates, key=distance_squared)
@@ -1030,7 +1057,9 @@ class CrossboardUI:
             return
         x = event.x_root - self.canvas.winfo_rootx()
         y = event.y_root - self.canvas.winfo_rooty()
-        if not (0 <= x < self.CELL*self.game.size and 0 <= y < self.CELL*self.game.size):
+        lm = self.LABEL_MARGIN
+        board_extent = self.CELL * self.game.size
+        if not (0 <= x < board_extent and lm <= y < board_extent + lm):
             edge = None
         else:
             edge = self._nearest_wall_edge(x, y, self.drag_wall_orientation)
@@ -1046,7 +1075,9 @@ class CrossboardUI:
         orientation = self.drag_wall_orientation
         self.drag_wall_orientation = None
         self.drag_preview_edge = None
-        if 0 <= x < self.CELL*self.game.size and 0 <= y < self.CELL*self.game.size:
+        lm = self.LABEL_MARGIN
+        board_extent = self.CELL * self.game.size
+        if 0 <= x < board_extent and lm <= y < board_extent + lm:
             wall_edge = self._nearest_wall_edge(x, y, orientation)
             if wall_edge is not None:
                 try:
